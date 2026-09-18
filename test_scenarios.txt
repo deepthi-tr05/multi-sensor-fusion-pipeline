@@ -1,0 +1,219 @@
+================================================================
+  Multi-Sensor Fusion Pipeline — Test Scenarios
+================================================================
+This document describes each test scenario, the expected
+terminal output, and how to observe it during a demonstration.
+
+All scenarios run automatically in SCRIPTED mode (default).
+Simply start the three processes and watch the output.
+
+----------------------------------------------------------------
+HOW TO RUN ALL SCENARIOS IN ONE SHOT
+----------------------------------------------------------------
+
+Terminal 1 (Fusion — start this FIRST):
+  cd multi_sensor_fusion
+  ./fusion
+
+Terminal 2 (LiDAR simulator):
+  cd multi_sensor_fusion
+  ./lidar_simulator
+
+Terminal 3 (Camera simulator):
+  cd multi_sensor_fusion
+  ./camera_simulator
+
+All five scenarios will play out automatically within
+the first ~12 seconds. The processes then loop through
+the scripted sequence again.
+
+Press Ctrl+C in each terminal to stop (Fusion first is fine).
+
+================================================================
+TEST 1 — MATCHING DETECTIONS (Fused Object)
+================================================================
+
+Trigger:
+  LiDAR  sends Object ID 1, Distance 10.2 m, Angle 30.0 deg
+  Camera sends Object ID 1, Type: Person, Angle 32.0 deg
+
+Association check:
+  |30.0 - 32.0| = 2.0 deg  <=  ANGLE_TOLERANCE_DEG (5.0 deg)
+  → MATCH
+
+Confidence breakdown:
+  Base                        : 70
+  Angle diff 2.0 deg (< 3.0) : +10
+  Camera type = Person        : +10
+  Camera size = Medium        : +5
+  Total                       : 95%
+
+Expected output in Terminal 1 (Fusion):
+
+  [FUSION] Matching LiDAR and Camera detections...
+
+  ========== FUSED OBJECT ==========
+  Object Type : Person
+  Distance    : 10.2 m
+  Angle       : 31.0 degrees
+  Size        : Medium
+  Confidence  : 95%
+  LiDAR ID    : 1
+  Camera ID   : 1
+  ===================================
+
+================================================================
+TEST 2 — LIDAR-ONLY DETECTION
+================================================================
+
+Trigger:
+  LiDAR  sends Object ID 2, Distance 15.0 m, Angle 60.0 deg
+  Camera sends Object at Angle 32.0 deg (no detection near 60°)
+
+Association check:
+  No camera detection within 5.0 deg of 60.0 deg.
+  Detection sits in pending LiDAR buffer.
+  After STALE_THRESHOLD_MS (2000 ms) with no camera match:
+
+Expected output in Terminal 1 (Fusion):
+
+  [FUSION] Single-sensor detection
+    Source   : LiDAR
+    Object ID: 2
+    Distance : 15.0 m
+    Angle    : 60.0 degrees
+
+================================================================
+TEST 3 — CAMERA-ONLY DETECTION
+================================================================
+
+Trigger:
+  Camera sends Object ID 2, Type: Car, Angle 110.0 deg
+  LiDAR  sends nothing near 110.0 deg
+
+Association check:
+  No LiDAR detection within 5.0 deg of 110.0 deg.
+  After STALE_THRESHOLD_MS (2000 ms) with no LiDAR match:
+
+Expected output in Terminal 1 (Fusion):
+
+  [FUSION] Single-sensor detection
+    Source      : Camera
+    Object ID   : 2
+    Object Type : Car
+    Angle       : 110.0 degrees
+    Size        : Large
+
+================================================================
+TEST 4 — DIFFERENT OBJECTS (Must NOT be fused)
+================================================================
+
+Trigger:
+  LiDAR  sends Object ID 3, Distance 8.5 m, Angle 20.0 deg
+  Camera sends Object ID 3, Type: Truck, Angle 80.0 deg
+
+Association check:
+  |20.0 - 80.0| = 60.0 deg  >>  ANGLE_TOLERANCE_DEG (5.0 deg)
+  → NO MATCH
+
+Expected output in Terminal 1 (Fusion):
+
+  (No fused object is printed for these two)
+
+  After stale timeout:
+  [FUSION] Single-sensor detection   ← LiDAR Object ID 3 at 20 deg
+  [FUSION] Single-sensor detection   ← Camera Object ID 3 at 80 deg
+
+  The two are NEVER incorrectly fused.
+
+================================================================
+TEST 5 — STALE DATA DISCARDED
+================================================================
+
+Trigger:
+  LiDAR sends Object ID 5, Angle 10.0 deg.
+  Camera sends Object ID 5, Type: Truck, Angle 130.0 deg.
+  (These differ by 120 deg — no match.)
+  Both sit in their pending buffers.
+  After 2000 ms with no match from the other sensor:
+
+Expected output in Terminal 1 (Fusion):
+
+  [FUSION] Discarding stale LiDAR detection: ID=5 age=XXXX ms
+  [FUSION] Single-sensor detection
+    Source   : LiDAR
+    Object ID: 5
+    Distance : 25.0 m
+    Angle    : 10.0 degrees
+
+  [FUSION] Discarding stale Camera detection: ID=5 age=XXXX ms
+  [FUSION] Single-sensor detection
+    Source      : Camera
+    Object ID   : 5
+    Object Type : Truck
+    Angle       : 130.0 degrees
+    Size        : Large
+
+================================================================
+ADDITIONAL SCRIPTED EVENTS
+================================================================
+
+Step 3 (Repeat of Test 1 with different objects):
+  LiDAR  Object ID 4, Angle 45.0 deg
+  Camera Object ID 4, Bicycle, Angle 44.0 deg
+  Diff = 1.0 deg → Fused with Confidence = 90%
+  (Base 70 + angle<3 10 + type 10 = 90, size Small → no +5)
+
+Step 5 (Another match):
+  LiDAR  Object ID 6, Angle -15.0 deg
+  Camera Object ID 6, Person, Angle -13.0 deg
+  Diff = 2.0 deg → Fused with Confidence = 95%
+
+Step 6 (Camera-only):
+  Camera Object ID 7, Animal, Angle 170.0 deg
+  No LiDAR near 170.0 deg → Camera-only detection after timeout
+
+================================================================
+RANDOM MODE TEST
+================================================================
+
+To test with random data:
+
+Terminal 2:  ./lidar_simulator random
+Terminal 3:  ./camera_simulator random
+
+Observe:
+  - Some detections will be fused (random angle overlap).
+  - Many will be single-sensor (angles differ widely).
+  - Stale messages appear regularly as unmatched detections age.
+
+================================================================
+CONFIGURATION CHANGES (advanced)
+================================================================
+
+To change the angle tolerance:
+  Edit ANGLE_TOLERANCE_DEG in common.h (default: 5.0)
+  Rebuild: make
+
+To change the stale threshold:
+  Edit STALE_THRESHOLD_MS in common.h (default: 2000)
+  Rebuild: make
+
+To change sensor send rates:
+  Edit LIDAR_INTERVAL_MS  (default: 800 ms)
+  Edit CAMERA_INTERVAL_MS (default: 600 ms)
+  Rebuild: make
+
+================================================================
+LOG FILE
+================================================================
+
+All fusion events are saved to:
+  logs/fusion.log
+
+View live:
+  tail -f logs/fusion.log
+
+================================================================
+END OF TEST SCENARIOS
+================================================================

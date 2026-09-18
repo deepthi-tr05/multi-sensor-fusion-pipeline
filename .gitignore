@@ -1,0 +1,8 @@
+fusion
+lidar_simulator
+camera_simulator
+tests/inject_detection
+lidar_fifo
+camera_fifo
+*.log
+logs/*.log
